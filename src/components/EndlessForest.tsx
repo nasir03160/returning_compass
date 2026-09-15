@@ -460,8 +460,8 @@ export function EndlessForest() {
         ))}
       </Instances>
 
-      {/* Fallen branches */}
-      <Instances limit={130} range={g.branches.length} castShadow receiveShadow>
+      {/* Fallen branches — small/thin, not worth a shadow-casting pass */}
+      <Instances limit={130} range={g.branches.length} receiveShadow>
         <cylinderGeometry args={[0.04, 0.06, 1.6, 5]} />
         <meshStandardMaterial color="#241a10" roughness={1} />
         {g.branches.map((s) => (
@@ -474,8 +474,8 @@ export function EndlessForest() {
         ))}
       </Instances>
 
-      {/* Ground rocks (planted / half-buried) */}
-      <Instances limit={180} range={g.rocks.length} castShadow receiveShadow>
+      {/* Ground rocks (planted / half-buried) — small, not worth a shadow-casting pass */}
+      <Instances limit={180} range={g.rocks.length} receiveShadow>
         <dodecahedronGeometry args={[1, 0]} />
         <meshStandardMaterial color="#15100b" roughness={0.95} metalness={0.04} flatShading />
         {g.rocks.map((s) => (

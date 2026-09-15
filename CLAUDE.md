@@ -41,22 +41,22 @@ If the game "won't open", it's almost always a pile of stale Vite processes: kil
 
 ```
 public/
-├── assets/                       # GLB models
-│   ├── akm.glb                   # (0.8 MB) first-person weapon. Rigged arms+rifle. Anims: Idle, Reload, Shoot. 12 materials, 0 embedded images.
-│   ├── broadcast_tower.glb       # (6.7 MB, 6 textures ≤1.3 MB — decodes fine) objective tower. 2 meshes (tower_1/tower_2), no rig/anim. Normalised to 16 m in Beacon.tsx.
+├── assets/                       # GLB models — ALL sizes below are post-compression (2026-09-11, see §10)
+│   ├── akm.glb                   # (0.85 MB) first-person weapon. Rigged arms+rifle. Anims: Idle, Reload, Shoot. 12 materials, 0 embedded images.
+│   ├── broadcast_tower.glb       # (1.5 MB — was 6.7 MB) objective tower. 6 textures resized 1024²→512². 2 meshes (tower_1/tower_2). Normalised to 16 m in Beacon.tsx.
 │   ├── zombie.glb                # (2.1 MB) Mixamo-rigged zombie. 1 material "ColorSwatch" (white), 1 texture (335 KB). 13 anims: Walk, Walk2, Attack, Hit_reaction, Die, Die2, crawl, etc.
-│   ├── ground.glb                # REMOVED from the pipeline — ForestGround is fully procedural now (see §10)
-│   ├── sky.glb                   # (4.2 MB) equirect star photosphere ("PanoSphere")
+│   ├── sky.glb                   # (0.3 MB — was 4.2 MB) equirect star photosphere ("PanoSphere"), panorama resized 4096×2048→2048×1024.
 │   ├── moon.glb                  # MISSING as of 2026-09-11 — Moon.tsx falls back to MoonFallback.tsx (see §10)
-│   ├── grass_plants.glb          # (320 KB, trimmed from a 27 MB / ~800k-vert Sketchfab pack — see §10) real ground-cover, replaces the old dry_grass.glb slot
-│   ├── S1Tree1.glb / S1Tree2.glb # low-poly tree variants (instanced)
-│   ├── Deer.glb / Wolf.glb       # ambient wildlife
+│   ├── grass_plants.glb          # (0.3 MB, trimmed from a 27 MB / ~800k-vert Sketchfab pack — see §10) real ground-cover, replaces the old dry_grass.glb slot
+│   ├── S1Tree1.glb (1.0 MB, was 3.2) / S1Tree2.glb (0.7 MB, was 2.9) — low-poly tree variants (instanced), textures resized 1024²→512²
+│   ├── Deer.glb / Wolf.glb       # ambient wildlife (~1 MB each, no embedded textures)
 │   └── (orphaned, still on disk, DO NOT load — 4K-texture OOM):
 │       ammo_box.glb (28 MB), mossy_old_tree_log.glb (23 MB), forest_ruins.glb (159 MB)
+│       — `ground.glb` deleted 2026-09-11 (was already unused, ForestGround is procedural — see §10)
 ├── audio/
-│   ├── sfx/  ak_singleshot.mp3 · ak_burst.mp3 · reload.mp3 · mag_voice.mp3 · zombie_voice.mp3   (stale: ak_shot.mp3, heartbeat_hum.wav)
-│   └── vo/   sarah_opening.mp3 · jacob_opening.mp3           (orphaned — story removed)
-└── assets/sound/  walk.wav · run.wav · wolf_echo.wav · jump.wav · land.wav  (optional; synth fallbacks exist)
+│   ├── sfx/  ak_singleshot.mp3 · ak_burst.mp3 · reload.mp3 · mag_voice.mp3 · zombie.wav   (stale: heartbeat_hum.wav)
+│   └── vo/   (empty — story removed)
+└── assets/sound/  walk.mp3 (0.4 MB, was a 6 MB .wav) · run.mp3 (0.17 MB, was 2.6 MB) · wolf_echo.wav · jump.wav · land.wav  (last three optional; synth fallbacks exist)
 
 src/
 ├── App.tsx                       # Canvas, <Physics>, Player controller, HUD (Crosshair / AmmoHUD / CompassBar / hurt-flash), start overlay
@@ -340,6 +340,15 @@ Don't add `castShadow` to the moonlight `DirectionalLight`, the flashlight's `fi
 any other light without first checking the frame cost — each additional shadow-casting light is a
 full extra depth pass over everything in its frustum.
 
+**Casters are scoped too, not just lights (2026-09-11 perf pass).** Only `pineBushes` and `thickets`
+in `EndlessForest.tsx` have `castShadow` — `branches` and `rocks` (small, thin, numerous) and
+`CanopyLayer`'s two 130×130 alpha-tested overhead planes (huge, alpha-tested depth pass, 16 m up and
+essentially never inside the flashlight's tight 22-unit forward shadow frustum anyway) were dropped to
+receive-only. Tree trunks/leaves, the zombie skin, the weapon, and beacon towers were already
+receive-only or shadow-exempt before shadows even existed as a feature. If shadows ever need to look
+richer, add casting back one category at a time and actually check the frame cost — this list is the
+result of cutting it back down after enabling shadows made the game noticeably heavier.
+
 - **`HorrorAtmosphereLighting.tsx`**: fog/background `#080b12`, `THREE.FogExp2` density `0.045`
   (exponential, not linear — thickens gradually so it reads as haze, not a fade-out trick; fog colour
   matches background exactly so there's no visible seam where geometry fades out). `hemisphereLight`
@@ -423,6 +432,50 @@ puts a tight specular highlight under the flashlight — reads as damp ground ca
 of a flat, lightless plane) and `RepeatWrapping` on the texture with **world-locked UVs**
 (`uv = worldPos / TEX_WORLD`, not 0..1-per-tile) — that combination is what makes a large tiled ground
 plane read as many small repeats instead of one texture stretched huge across it.
+
+**Deployed-to-Vercel crash/lag on other people's devices (2026-09-11) — asset weight, not storage.**
+"Runs fine on my PC, crashes/lags for everyone else" on a static host is *not* a
+where-are-the-files-hosted problem (Vercel serves `public/` fine, same as any static host) — it's a
+**decoded GPU memory + total download weight** problem that a beefy dev machine never surfaces.
+Measured before this pass: ~23 MB of GLBs + ~8.6 MB of uncompressed footstep `.wav` loops ≈ 32 MB
+network payload, ALL fetched eagerly via `useGLTF.preload()` at module import (nothing is lazy —
+everything in this game is visible within a second of spawning anyway, so deferring wouldn't have
+helped much). Worse than the download size: **decoded texture memory** — `sky.glb`'s single
+4096×2048 equirect panorama alone decoded to ~34 MB of GPU memory, `broadcast_tower.glb`'s six
+1024² maps to ~24 MB, the two tree GLBs' six 1024² maps to another ~24 MB — roughly **90 MB of
+decoded textures** for one player, most of it on a background/decoration asset (the sky) nobody is
+ever looking closely at. A gaming PC shrugs this off; a mid-range phone's WebGL context (limited
+VRAM budget, stricter Safari/Chrome-mobile limits) does not — that's the actual crash.
+
+**Fix — resize, don't relocate.** Used `@gltf-transform/core` + `@gltf-transform/functions`'s
+`textureCompress({ encoder: sharp, resize: [512,512] })` (the same offline toolchain proven in the
+`grass_plants.glb` trim above) to downsize every embedded texture: `broadcast_tower.glb` 6.7→1.5 MB,
+`S1Tree1.glb` 3.2→1.0 MB, `S1Tree2.glb` 2.9→0.7 MB, `sky.glb` (resized to 2048×1024) 4.2→0.3 MB.
+Converted `walk.wav`/`run.wav` (6 MB / 2.6 MB uncompressed loops) to 96 kbps mono MP3 via
+`ffmpeg-static` — 6 MB → 0.4 MB, 2.6 MB → 0.17 MB; browsers play looped MP3 exactly the same as WAV,
+there was no reason these were ever shipped uncompressed. **Total payload dropped from ~32 MB to
+~9 MB**, and decoded texture memory from ~90 MB to roughly ~25 MB. Also deleted the now-fully-orphaned
+`ground.glb` (7.5 MB, dead weight in the deploy bundle, nothing has referenced it since the
+procedural-ground rewrite above).
+
+**If a future asset needs the same treatment:** `npx @gltf-transform/cli inspect file.glb` first to
+see actual embedded image resolutions (file size alone is misleading — a well-compressed JPEG can
+still decode to a huge texture); resize with the `textureCompress` script pattern above rather than
+re-authoring the model. A texture doesn't need to be 1024² (or bigger) for something viewed through
+fog, in the dark, with ACES tonemapping crushing detail anyway — 512² is usually indistinguishable in
+this scene and is a 4× memory win.
+
+**GOTCHA (this bit us too): `groundTexture()`'s contrast was originally far too low to see.** The
+fbm-driven dirt↔moss blend was real (verified the noise itself varied) but the two colours were close
+enough in value that the difference across the whole 512² canvas came out to only a few RGB points —
+under the scene's dim lighting + ACES tonemapping it looked like a flat, textureless glow, which read
+as "the ground isn't loading" even though the mesh and material were both correct and present. Fixed
+by (a) applying the smoothstep `contrast()` curve **twice** (a steeper S-curve → distinct blobs, not a
+gradient) and (b) widening the dirt/moss RGB range substantially (`[8,6,3]` → `[90,106,54]`, was
+`[20,16,9]` → `[40,52,30]`). If ground texture ever looks flat again, sample actual pixel values from
+`material.map.image` (a canvas — `ctx.getImageData(...)`) at a few points before assuming the mesh or
+lighting is at fault; a technically-varying-but-low-contrast procedural texture is an easy thing to
+misdiagnose as a missing asset.
 
 **Footstep audio has a synth fallback now, and real samples are in.** `walk.wav` / `run.wav` under
 `public/assets/sound/` are optional — always were, but there was no fallback if they 404'd, so a

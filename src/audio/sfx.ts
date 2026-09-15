@@ -28,7 +28,7 @@ export function initAudio(): void {
   if (started) return;
   started = true;
 
-  walk = new Audio('/assets/sound/walk.wav');
+  walk = new Audio('/assets/sound/walk.mp3');
   walk.loop = true;
   walk.volume = 0.55;
   walk.preload = 'auto';
@@ -37,7 +37,7 @@ export function initAudio(): void {
     if (loco === 'walk') startSynthSteps(false);
   });
 
-  run = new Audio('/assets/sound/run.wav');
+  run = new Audio('/assets/sound/run.mp3');
   run.loop = true;
   run.volume = 0.7;
   run.preload = 'auto';

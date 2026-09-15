@@ -7,8 +7,10 @@ import { fbm2D } from '../world/noise';
 /**
  * Overhead foliage canopy — discrete trees can't close over your head, so this
  * is a dark, alpha-mottled leaf sheet ~16 m up that follows the player, blocks
- * most of the sky, and lets only small pinpricks of moonlight through. It casts
- * shadow, so the floor gets a broken, dappled light.
+ * most of the sky, and lets only small pinpricks of moonlight through.
+ * Deliberately doesn't cast a shadow (see below) — the dappled-light look
+ * comes from its own alpha-mottled texture blocking the sky, not real-time
+ * shadow casting.
  */
 const HEIGHT = 16;
 const SPAN = 130;
@@ -65,8 +67,12 @@ export function CanopyLayer() {
 
   return (
     <group ref={ref}>
-      {/* two slightly offset layers = thicker, more broken cover */}
-      <mesh position={[0, HEIGHT, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+      {/* two slightly offset layers = thicker, more broken cover.
+          No castShadow: this is a huge (130x130) alpha-tested plane 16m up —
+          shadow-casting it means an expensive per-fragment alpha-tested depth
+          pass every frame for a shadow the flashlight's tight, forward-facing
+          22-unit frustum essentially never actually reaches. */}
+      <mesh position={[0, HEIGHT, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <planeGeometry args={[SPAN, SPAN]} />
         <meshStandardMaterial
           map={tex}
@@ -80,7 +86,7 @@ export function CanopyLayer() {
           depthWrite
         />
       </mesh>
-      <mesh position={[6, HEIGHT + 3.5, -5]} rotation={[Math.PI / 2, 0.15, 0.3]} castShadow>
+      <mesh position={[6, HEIGHT + 3.5, -5]} rotation={[Math.PI / 2, 0.15, 0.3]}>
         <planeGeometry args={[SPAN, SPAN]} />
         <meshStandardMaterial
           map={tex}
