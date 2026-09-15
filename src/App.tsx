@@ -600,11 +600,10 @@ export default function App() {
         dpr={[1, 1.5]}
         camera={{ position: [0, 1.7, 0], rotation: [0, 0, 0], fov: 62, near: 0.1, far: 470 }}
         gl={{ antialias: false, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.25 }}
-        // "soft" -> PCFSoftShadowMap. Only the flashlight's SpotLight actually
-        // casts (see FlashlightRig.tsx) — one shadow-casting light with a tight
-        // shadow-camera frustum, not a scene-wide shadow pass, is what keeps
-        // this affordable across the endless instanced forest.
-        shadows="soft"
+        // Real-time shadows were tried (`shadows="soft"` + a shadow-casting
+        // flashlight) and turned back off — see FlashlightRig.tsx's class doc
+        // comment. No `shadows` prop = shadow mapping fully disabled, which is
+        // the safer default until that's root-caused.
         style={{ filter: 'contrast(1.08) saturate(0.82) brightness(0.98)' }}
       >
         <HorrorAtmosphereLighting />

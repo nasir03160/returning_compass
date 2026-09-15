@@ -332,22 +332,25 @@ Single module, no React. `initAudio()` must be called from a user gesture (start
 
 ## 9. Lighting, Shadows & Atmosphere
 
-**Shadows (2026-09-11):** `<Canvas shadows="soft">` in `App.tsx` enables `THREE.PCFSoftShadowMap`
-scene-wide, but **only one light actually casts** — the flashlight's `SpotLight` in
-`FlashlightRig.tsx`. That's a deliberate, load-bearing choice: a single shadow-casting light with a
-tight shadow-camera frustum is cheap; scene-wide shadows across ~900 instanced trees would not be.
-Don't add `castShadow` to the moonlight `DirectionalLight`, the flashlight's `fill`/`feet` lights, or
-any other light without first checking the frame cost — each additional shadow-casting light is a
-full extra depth pass over everything in its frustum.
+**Shadows: tried, then disabled (2026-09-11 → reverted 2026-09-16).** Real-time shadow mapping was
+added — `<Canvas shadows="soft">` + one shadow-casting `SpotLight` (the flashlight, tight shadow-camera
+frustum, everything else exempt to keep it cheap) — and then **turned back off** after it produced a
+full-scene white-out on at least one machine during real play. Not reproducible in the dev/test
+environment (no console error, survived static camera moves, distance, many angles) — reads as a
+driver/GPU-specific shadow-map fault rather than a logic bug, which is exactly the kind of thing that's
+untestable without the affected hardware's console output. **Current state: `shadows` prop removed
+from `<Canvas>`, `primary.castShadow = false` in `FlashlightRig.tsx`, the tuned shadow-map config
+(mapSize/near/far/radius/bias) left in as commented-out code** so re-enabling is a one-line flip once
+this is actually root-caused — don't flip it back on blind. The beam-shape work (penumbra, decay,
+intensity) and the ambient/hemisphere legibility fixes below are unrelated to shadow-casting and stay
+in effect; visual quality is unaffected by this reversion, only the extra directional shadow detail is
+gone. `castShadow`/`receiveShadow` props still present on various meshes (`pineBushes`, `thickets`,
+`CanopyLayer`, etc.) are harmless no-ops while shadow mapping is off — left in place for whenever
+shadows get a real second attempt.
 
-**Casters are scoped too, not just lights (2026-09-11 perf pass).** Only `pineBushes` and `thickets`
-in `EndlessForest.tsx` have `castShadow` — `branches` and `rocks` (small, thin, numerous) and
-`CanopyLayer`'s two 130×130 alpha-tested overhead planes (huge, alpha-tested depth pass, 16 m up and
-essentially never inside the flashlight's tight 22-unit forward shadow frustum anyway) were dropped to
-receive-only. Tree trunks/leaves, the zombie skin, the weapon, and beacon towers were already
-receive-only or shadow-exempt before shadows even existed as a feature. If shadows ever need to look
-richer, add casting back one category at a time and actually check the frame cost — this list is the
-result of cutting it back down after enabling shadows made the game noticeably heavier.
+**If re-attempting shadows:** get the affected user's exact GPU + browser + a console screenshot
+*before* touching code — this class of bug (fine in every test environment, white-out on one real
+device) can't be diagnosed by re-guessing tuning values.
 
 - **`HorrorAtmosphereLighting.tsx`**: fog/background `#080b12`, `THREE.FogExp2` density `0.045`
   (exponential, not linear — thickens gradually so it reads as haze, not a fade-out trick; fog colour
@@ -369,12 +372,12 @@ result of cutting it back down after enabling shadows made the game noticeably h
     too slow — stayed bright almost to `distance` then died fast, another hard-edge source) balanced
     against a physically-correct `2.0` that would fall off too fast for this scene; intensity bumped
     `42 → 58` to compensate.
-  - **Shadow config** (`primary.castShadow = true`): `shadow.mapSize` 1024², `shadow.camera.near/far`
-    tightened to `0.3 / 22` (matching the beam's *practical* throw, not some large default) — this is
-    what gives the shadow depth buffer enough precision to avoid banding/stripe artifacts, not the map
-    resolution. `shadow.radius = 4` for the PCF soft blur. `shadow.bias -0.0003` (kills acne) +
-    `shadow.normalBias 0.045` (kills peter-panning) — revisit these two first if shadows ever
-    creep/detach again after a geometry change.
+  - **Shadow config: written but disabled** (`primary.castShadow = false` as of 2026-09-16 — see the
+    "Shadows: tried, then disabled" note above). The tuned values are left commented next to it for
+    later: `shadow.mapSize` 1024², `shadow.camera.near/far` tightened to `0.3 / 22` (matching the
+    beam's *practical* throw, not some large default — this is what gives the shadow depth buffer
+    enough precision to avoid banding/stripe artifacts, not the map resolution), `shadow.radius = 4`
+    for the PCF soft blur, `shadow.bias -0.0003` + `shadow.normalBias 0.045` (acne / peter-panning).
 - **`FlashlightFX.tsx`**: camera-space drifting dust motes only. The volumetric beam cone was removed
   (it was rebuilt every frame down the view axis → read as a dark disc glued to the crosshair).
 

@@ -13,12 +13,16 @@ interface FlashlightRigProps {
  * looks. The target is also a camera child one unit ahead, so it moves with the
  * view automatically.
  *
- * Shadow-casting is deliberately scoped to ONE light (this SpotLight) with a
- * tight shadow-camera frustum — that's what keeps soft real-time shadows
- * affordable across an endless, densely-instanced forest. Don't add
- * `castShadow` to the fill/feet lights below; that would multiply the shadow
- * pass cost for no visual gain (they're soft ambient fills, not the source of
- * directional shadow detail).
+ * Real-time shadow-casting was tried here (2026-09) — one SpotLight, a tight
+ * shadow-camera frustum — and **turned back off**: on at least one machine it
+ * produced a full-scene white-out after some play (not reproducible in this
+ * dev environment — no console error, no obvious trigger, survived static
+ * camera moves, distance, and re-renders here — so it reads as a
+ * driver/GPU-specific shadow-map fault rather than a logic bug). Given how
+ * severe "the whole game goes white" is versus what shadows add visually
+ * here, reliability wins: `castShadow` stays `false` below until this can be
+ * root-caused on the affected hardware (get exact GPU + browser console
+ * output before re-attempting). Don't re-enable it blind.
  */
 export function FlashlightRig({ on, power }: FlashlightRigProps) {
   const { camera, scene } = useThree();
@@ -50,31 +54,17 @@ export function FlashlightRig({ on, power }: FlashlightRigProps) {
     primary.position.set(0.15, -0.1, 0); // roughly head/shoulder height
     primary.target = target;
 
-    // Real-time shadow map — tightly scoped so it stays cheap:
-    primary.castShadow = true;
-    primary.shadow.mapSize.set(1024, 1024); // sharp enough up close, not GPU-heavy
-    // Near/far are the light's OWN shadow-camera depth range, not the beam's
-    // visual falloff distance. Keeping this tight (0.3–22, matching how far
-    // the beam actually reads before fog/decay swallow it) is what gives the
-    // depth buffer enough precision to avoid banding/"stripe" artifacts on the
-    // ground — a far plane left at some huge default value is the classic
-    // cause of that look.
-    primary.shadow.camera.near = 0.3;
-    primary.shadow.camera.far = 22;
-    // Soft PCF filtering needs a wider blur radius than the default to read as
-    // "soft" rather than "slightly fuzzy" — paired with `shadows="soft"` on
-    // the <Canvas> (PCFSoftShadowMap) in App.tsx.
-    primary.shadow.radius = 4;
-    // Bias pair that eliminates both classic shadow artifacts at once:
-    //   bias        (small negative) — stops "shadow acne" (self-shadowing
-    //               moiré noise on lit surfaces)
-    //   normalBias  (small positive, scaled to world units) — stops "peter
-    //               panning" (shadows detaching from the object casting them)
-    // Tuned for this scene's scale (a person-sized light a few metres off the
-    // ground); if shadows ever creep or detach again after a geometry change,
-    // these two are the first values to revisit.
-    primary.shadow.bias = -0.0003;
-    primary.shadow.normalBias = 0.045;
+    // Real-time shadow map — DISABLED (see the class doc comment above: caused
+    // a full white-out on at least one machine). The tuned config is left
+    // here, commented, so re-enabling later is a one-line flip once the
+    // underlying cause is understood rather than re-deriving these numbers.
+    primary.castShadow = false;
+    // primary.shadow.mapSize.set(1024, 1024);
+    // primary.shadow.camera.near = 0.3;
+    // primary.shadow.camera.far = 22;
+    // primary.shadow.radius = 4;
+    // primary.shadow.bias = -0.0003;
+    // primary.shadow.normalBias = 0.045;
 
     camera.add(primary);
     primaryRef.current = primary;
