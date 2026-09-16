@@ -19,6 +19,7 @@ import { playerPosition, playerState } from './world/playerState';
 import { weaponState } from './world/weaponState';
 import { combatState } from './world/combatState';
 import { staminaState, staminaFrac, STAMINA_LOW_FRAC } from './world/staminaState';
+import { subtitleState, SUBTITLE_FADE_MS } from './world/subtitleState';
 import {
   noiseState,
   pruneNoise,
@@ -487,6 +488,38 @@ function StaminaHUD() {
   );
 }
 
+/** Night 2 — a found-audio transcription line, shown while a beacon
+ *  transmission plays and faded out after. Not a dialogue box: one line,
+ *  center-low, out of the way of the crosshair and both side HUD clusters. */
+function SubtitleHUD() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const el = ref.current;
+      if (el) {
+        const remain = subtitleState.showUntil - performance.now();
+        if (remain > 0 && subtitleState.text) {
+          if (el.textContent !== subtitleState.text) el.textContent = subtitleState.text;
+          el.style.opacity = remain < SUBTITLE_FADE_MS ? String(Math.max(0, remain / SUBTITLE_FADE_MS)) : '1';
+        } else {
+          el.style.opacity = '0';
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[70%] text-center text-[13px] italic text-slate-200/95 tracking-wide opacity-0 transition-opacity duration-300"
+      style={{ textShadow: '0 1px 5px rgba(0,0,0,0.95)' }}
+    />
+  );
+}
+
 // --- MAIN GAME APPLICATION CONTAINER ---
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
@@ -519,6 +552,7 @@ export default function App() {
       {showHud && <AmmoHUD />}
       {showHud && <StaminaHUD />}
       {showHud && <ObjectiveHUD />}
+      {showHud && <SubtitleHUD />}
 
       {extracted && (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-[#02120a]/92 backdrop-blur-md">

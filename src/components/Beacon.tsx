@@ -11,6 +11,8 @@ import {
   CAPTURE_SECONDS,
   type BeaconRuntime,
 } from '../world/beaconState';
+import { playChoirFragment, CHOIR_SUBTITLES } from '../audio/sfx';
+import { showSubtitle } from '../world/subtitleState';
 
 const TOWER_URL = '/assets/broadcast_tower.glb';
 useGLTF.preload(TOWER_URL);
@@ -88,7 +90,14 @@ export function Beacon({ id }: { id: number }) {
       if (inRadius) {
         b.progress = Math.min(CAPTURE_SECONDS, b.progress + dt);
         setPermanentNoise(NOISE_KEY(id), b.x, b.z, CAPTURE_NOISE.intensity, CAPTURE_NOISE.radius);
-        if (b.progress >= CAPTURE_SECONDS) b.phase = 'lit';
+        if (b.progress >= CAPTURE_SECONDS) {
+          b.phase = 'lit';
+          // Night 2 payoff — fires exactly once: this branch only runs while
+          // phase is still 'capturing', and the line above just left it.
+          const dist = Math.hypot(dx, dz);
+          playChoirFragment(id, dist);
+          showSubtitle(CHOIR_SUBTITLES[id] ?? '', 6500);
+        }
       } else {
         // leaving pauses the timer (banked progress kept) and silences it
         clearPermanentNoise(NOISE_KEY(id));

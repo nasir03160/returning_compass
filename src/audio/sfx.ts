@@ -374,9 +374,179 @@ export function playMagVoice(): void {
   playSample(MAG_VOICE_URL, 1);
 }
 
-/** Zombie snarl — volume falls off with distance to the player. */
+/* ------------------------------------------------------------------ *
+ * NIGHT 2 — "The Choir": a 5-part numbers-station transmission, one
+ * fragment fired per beacon the instant it's lit (see Beacon.tsx). No real
+ * audio was supplied for this, so it's synthesised — same
+ * sample-then-synth-fallback shape as everything else here: an optional
+ * real file (`/audio/sfx/choir_<n>.mp3`) is tried first via a proper HEAD
+ * check (NOT the fire-and-forget `playSample` pattern — that helper
+ * optimistically returns `true` on a file's first-ever call before it's
+ * known to be missing, which would silently eat the ONE guaranteed play
+ * each fragment gets), synth otherwise.
+ * ------------------------------------------------------------------ */
+const CHOIR_URLS = [0, 1, 2, 3, 4].map((i) => `/audio/sfx/choir_${i}.mp3`);
+
+// Each fragment's "digits" — also its pitch fingerprint (digitTone below maps
+// 0-9 to distinct frequencies), so the five transmissions are audibly
+// different from each other, not just five copies of the same beep pattern.
+const CHOIR_DIGITS: readonly number[][] = [
+  [3, 7, 1, 9, 4],
+  [1, 8, 2, 6, 5],
+  [9, 4, 4, 1, 7],
+  [2, 0, 6, 3, 8],
+  [5, 5, 5, 5, 5],
+];
+
+/** Subtitle transcription per fragment — only reads as one message once all
+ *  five have played. Consumed by App.tsx's SubtitleHUD via subtitleState. */
+export const CHOIR_SUBTITLES: readonly string[] = [
+  '"…three — seven — one — nine — four. The garden. Stand by."',
+  '"…one — eight — two — six — five. It hears the call."',
+  '"…nine — four — four — one — seven. Roots before towers."',
+  '"…two — zero — six — three — eight. We were never first."',
+  '"…five — five — five — five — five. It is awake. End transmission."',
+];
+
+/** The cold two-tone "this is a transmission" chime — reused (pitched down,
+ *  smeared) as the zombie echo-bark motif below, so the two read as connected
+ *  even without a shared sample. */
+function intervalChime(c: AudioContext, at: number, master: GainNode, pitch = 1): void {
+  [520 * pitch, 780 * pitch].forEach((f, i) => {
+    const osc = c.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    const g = c.createGain();
+    const t0 = c.currentTime + at + i * 0.28;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(0.3, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
+    osc.connect(g).connect(master);
+    osc.start(t0);
+    osc.stop(t0 + 0.3);
+  });
+}
+
+function digitTone(c: AudioContext, at: number, digit: number, dur: number, master: GainNode): void {
+  const freq = 260 + digit * 42; // distinct pitch per digit 0-9
+  const osc = c.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = freq;
+  bp.Q.value = 6; // narrow — reads as a filtered radio tone, not a pure beep
+  const g = c.createGain();
+  const t0 = c.currentTime + at;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(0.5, t0 + 0.03);
+  g.gain.setValueAtTime(0.5, t0 + dur - 0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(bp).connect(g).connect(master);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
+
+function staticBed(c: AudioContext, duration: number, master: GainNode): void {
+  const buf = c.createBuffer(1, Math.ceil(c.sampleRate * duration), c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  const hp = c.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 2500;
+  const g = c.createGain();
+  g.gain.value = 0.035; // very quiet analog hiss bed under the tones
+  src.connect(hp).connect(g).connect(master);
+  src.start(c.currentTime);
+  src.stop(c.currentTime + duration + 0.1);
+}
+
+function synthChoirFragment(index: number, volume: number): void {
+  const c = synthCtx();
+  if (!c) return;
+  const master = c.createGain();
+  master.gain.value = volume;
+  master.connect(c.destination);
+
+  const digits = CHOIR_DIGITS[index] ?? CHOIR_DIGITS[0];
+  const totalDur = 0.9 + digits.length * 0.62;
+  staticBed(c, totalDur, master);
+  intervalChime(c, 0, master);
+  let t = 0.75;
+  for (const d of digits) {
+    digitTone(c, t, d, 0.42, master);
+    t += 0.62;
+  }
+  intervalChime(c, t + 0.1, master); // closing chime — "end of group"
+}
+
+/** HEAD-check a URL and, if it exists, play it — unlike playSample() this
+ *  never optimistically returns true before knowing, because these fragments
+ *  each only get ONE play and a wrong guess would just be silence. */
+async function tryRealAudio(url: string, volume: number): Promise<boolean> {
+  try {
+    const head = await fetch(url, { method: 'HEAD' });
+    if (!head.ok) return false;
+    const el = new Audio(url);
+    el.volume = volume;
+    await el.play();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fired once, from Beacon.tsx, the instant a beacon transitions to `lit` —
+ *  plays that beacon's fragment of the shared 5-part transmission. */
+export function playChoirFragment(index: number, distToPlayer: number): void {
+  const v = Math.max(0.2, Math.min(1, 1 - distToPlayer / 60));
+  const url = CHOIR_URLS[index];
+  if (!url) return;
+  void tryRealAudio(url, v).then((ok) => {
+    if (!ok) synthChoirFragment(index, v);
+  });
+}
+
+/** A groaned echo of the transmission's interval chime — pitched way down
+ *  and smeared, not a spoken phrase (no TTS available). Used by
+ *  playZombieVoice() below as an occasional variant bark. */
+function synthZombieEcho(volume: number): void {
+  const c = synthCtx();
+  if (!c) return;
+  const master = c.createGain();
+  master.gain.value = volume;
+  master.connect(c.destination);
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 480;
+  lp.connect(master);
+  [520 * 0.4, 780 * 0.4].forEach((f, i) => {
+    const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    const t0 = c.currentTime + i * 0.35;
+    osc.frequency.setValueAtTime(f, t0);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.72, t0 + 0.9);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(0.4, t0 + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);
+    osc.connect(g).connect(lp);
+    osc.start(t0);
+    osc.stop(t0 + 1);
+  });
+}
+
+/** Zombie snarl — volume falls off with distance to the player. 1-in-4 barks
+ *  use a synthesised "echo" of the transmission's tone instead of the usual
+ *  sample — half-recognisable, not an announcement (Night 2). */
 export function playZombieVoice(distToPlayer: number): void {
   const v = Math.max(0.05, Math.min(1, 1 - distToPlayer / 42));
+  if (Math.random() < 0.25) {
+    synthZombieEcho(v);
+    return;
+  }
   playSample(ZOMBIE_VOICE_URL, v, { jitter: 0.03 });
 }
 /** Empty-mag click. */

@@ -521,3 +521,58 @@ whole pack; that mistake is exactly what made `ground.glb` a problem earlier in 
    can strip them. GLBs carrying 4K PBR stacks (`ammo_box.glb`, `mossy_old_tree_log.glb`,
    `forest_ruins.glb`) caused `ERR_BLOB_OUT_OF_MEMORY` and are replaced with procedural meshes. Check
    texture size before adding any new GLB.
+
+---
+
+## 12. Narrative Layer — "The Nights" (Dead Air / Static Bloom fusion)
+
+Staged build per the design dossier — one Night at a time, each verified before the next. **Night 1**
+is the MVP itself (§§1–11), played straight, no exposition. This section covers what's actually built
+on top of it so far.
+
+### Night 2 — "The Choir" (built 2026-09-17)
+
+Goal: each beacon's `lit` transition plays one fragment of a continuous 5-part numbers-station
+transmission; by the time all 5 are lit, the player has heard the whole message. No dialogue, no VO
+cast, no new core system — content wired into `Beacon.tsx`'s existing capture FSM and `sfx.ts`'s
+sample pattern, exactly as scoped.
+
+- **`world/subtitleState.ts`** (new) — `{ text, showUntil }` plain singleton + `showSubtitle(text,
+  durationMs=6000)`. `SubtitleHUD` in `App.tsx` (same rAF-poll pattern as `StaminaHUD`/`ObjectiveHUD`)
+  renders one italic line at `bottom-24` (clear of `AmmoHUD`/`StaminaHUD` at `bottom-6`/`bottom-7`),
+  fading over the last `SUBTITLE_FADE_MS` (900 ms) of its window.
+- **`audio/sfx.ts`** — `playChoirFragment(index, distToPlayer)`: no real audio was supplied for this,
+  so all 5 fragments are **synthesised** (`synthChoirFragment`) — a cold two-tone "interval chime"
+  bookending 5 filtered-sine "digit" tones (`digitTone`, one frequency per digit 0-9 so each of the 5
+  fragments is audibly distinct) over a quiet highpassed-noise static bed. An optional real override
+  (`/audio/sfx/choir_0.mp3` … `choir_4.mp3`) is tried first — **not** via the usual `playSample()`
+  fire-and-forget helper, which optimistically returns `true` on a URL's first-ever call before it's
+  known to 404 (fine for a repeating sound like gunfire, which self-corrects next shot; wrong here
+  because each fragment only gets ONE play per playthrough — a wrong guess would just be permanent
+  silence). Instead `tryRealAudio()` does a real `fetch(url, {method:'HEAD'})` check before deciding.
+  `CHOIR_SUBTITLES` holds the 5 transcriptions (a small arc: "the garden… it hears the call… roots
+  before towers… we were never first… it is awake") — deliberately seeding the Night 3 ecological
+  reveal.
+- **`Beacon.tsx`** — the `playChoirFragment(id, dist)` + `showSubtitle(CHOIR_SUBTITLES[id])` call sits
+  directly inside the `if (b.progress >= CAPTURE_SECONDS) { b.phase = 'lit'; ... }` block. Fires
+  exactly once by construction: the enclosing `if (b.phase === 'capturing')` guard is only true up to
+  the frame that sets `phase = 'lit'`, never again after. No new state, no explicit "already played"
+  flag needed.
+- **`playZombieVoice()`** — 1-in-4 barks (`Math.random() < 0.25`) now call `synthZombieEcho()` instead
+  of playing the usual `zombie.wav` sample: the same interval-chime motif from the choir fragments,
+  pitched to 40% and smeared through a lowpass into a groan via a downward-sweeping sawtooth — reads as
+  an echo of the transmission, not a spoken phrase (no TTS available), and ties the two sounds together
+  for a player who's paying attention without announcing anything. Everything else about
+  `playZombieVoice` (distance falloff, call sites, cadence) is untouched — this is a sample-choice
+  swap only, per the stage's explicit scope limit (no touching `noiseState.ts` or `Zombie.tsx`'s FSM).
+
+**Verified:** all 5 `playChoirFragment` calls and 12 `playZombieVoice` calls (mix of default/echo
+branches) run error-free; `CHOIR_SUBTITLES` text confirmed flowing into `subtitleState`;
+`SubtitleHUD` confirmed mounted with correct classes/position. Full audio playback and the on-screen
+fade timing need a real browser pass (this project's preview tooling can't run `useFrame`/`rAF` loops
+in the background — see the note at the top of this file).
+
+**Not built yet:** Night 3 ("Root Signal" — fog/ground tint + spore particles + zombie detuning near
+lit beacons + one environmental prop per tower) and Night 4 ("Signal Zero" — the countdown-extraction
+finale, the one stage that adds a genuinely new system). Both are staged for later, one at a time, per
+the dossier's own build-order reasoning.
