@@ -572,7 +572,97 @@ branches) run error-free; `CHOIR_SUBTITLES` text confirmed flowing into `subtitl
 fade timing need a real browser pass (this project's preview tooling can't run `useFrame`/`rAF` loops
 in the background — see the note at the top of this file).
 
-**Not built yet:** Night 3 ("Root Signal" — fog/ground tint + spore particles + zombie detuning near
-lit beacons + one environmental prop per tower) and Night 4 ("Signal Zero" — the countdown-extraction
-finale, the one stage that adds a genuinely new system). Both are staged for later, one at a time, per
-the dossier's own build-order reasoning.
+### Night 3 — "The Root" (built 2026-09-17)
+
+Goal: sell "something is growing under the lit beacons" purely through environment reactivity —
+fog/ground tint, particles, a procedural prop, and zombie-voice detuning, all scaled by proximity to
+the nearest **lit** beacon. Content/VFX only, per the stage's scope fence: no `Beacon.tsx` capture-logic
+edits, no `Zombie.tsx` FSM edits.
+
+- **`world/beaconState.ts`** — two new pure, read-only queries, added without touching capture state:
+  `ROOT_SIGNAL_RADIUS = 30` (hand-kept in sync with `Beacon.tsx`'s own `LIT_NOISE.radius` — deliberately
+  not re-exported from there, to avoid a component/state coupling in that direction) and
+  `nearestLitBeaconDist(x, z)` (distance to the nearest `phase === 'lit'` beacon, `Infinity` if none).
+  Every Night 3 system below derives its proximity blend `k = clamp(1 - dist/ROOT_SIGNAL_RADIUS, 0, 1)`
+  from this one function, so "how close to a lit tower" means the same thing everywhere.
+- **`HorrorAtmosphereLighting.tsx` / `ForestGround.tsx`** — both already had a `useFrame`; each gained a
+  proximity lerp from their existing base colour (fog/background `#080b12`, ground `#8a9270`) toward a
+  sickly "root tint" (`#242414` / `#6b6a3f`) using pre-allocated `THREE.Color` instances (`_nightBase`/
+  `_rootTint`, `_groundBase`/`_groundTint`) — zero new allocation in the loop, per §11 rule 1.
+- **`SporeFX.tsx`** (new) — a second camera-wrapped particle layer alongside `FlashlightFX`'s dust, same
+  wrap-around-the-player technique but spore-like: 200 points, drift **upward**, faint green
+  (`#8fdc7a`), opacity ramps with the same `k` (invisible outside `ROOT_SIGNAL_RADIUS`, `pts.visible`
+  gated off entirely below `k > 0.01` so it costs nothing far from any tower).
+- **`RootGrowth.tsx`** (new) — one procedural root-and-pod cluster per beacon (6 tendrils built from
+  `CylinderGeometry`, 2 glowing `emissive` pods each from a shared `SphereGeometry`), positioned at that
+  beacon's `(x, z)` via `terrainHeightAt`. Reads `beaconState.beacons[id].phase` imperatively in
+  `useFrame` (`g.visible = phase === 'lit'`) — the same pattern `Beacon.tsx`/`Extraction.tsx` already
+  use for shared singleton state, kept as its own component specifically so nothing needed editing
+  inside `Beacon.tsx` itself. Built from primitives, not a GLB — consistent with §10's
+  procedural-over-GLB default for new props.
+- **`audio/sfx.ts` / `Zombie.tsx`** — `playZombieVoice(distToPlayer, zx?, zz?)` grew two optional
+  coordinate args; when supplied, it looks up that position's proximity to the nearest lit beacon and
+  detunes `synthZombieEcho`'s pitch down (via a new `rateMul` param, scaling both oscillator frequency
+  and stretching the envelope by `1/rateMul`) up to 22% the closer the zombie is to a lit tower — reads
+  as the transmission's influence bleeding into the zombie's groan. `Zombie.tsx`'s two call sites just
+  pass their own `g.position.x/z` through; no FSM state or transition touched.
+- **`App.tsx`** — `<RootGrowths />` and `<SporeFX />` added inside `<Physics>`, no gating needed (each
+  component gates its own visibility off `beaconState`/proximity internally).
+
+**Verified:** `npm run lint` + `npm run build` clean; `RootGrowths`/`SporeFX` exports, imports, and JSX
+call sites all confirmed to match by direct source read. **Not verified in this environment** (same
+`useFrame`/rAF limitation as Night 2 — see the note at the top of this file): the actual look of the
+fog/ground tint blending in real time, spore particle motion, the root-growth pods' pulse, and the
+zombie-voice pitch shift's audible effect near a lit tower. Test these first in a real browser pass.
+
+### Night 4 — "Signal Zero" (built 2026-09-17)
+
+Goal: the extraction beat stops being an instant touch-to-win pad and becomes a hold-your-ground
+countdown under rising zombie pressure. This is the one Night stage explicitly scoped to add a new core
+system (everything else this Night is content wiring on top of it).
+
+- **`world/extractionState.ts`** (new) — plain singleton, same shape as `beaconState`/`staminaState`:
+  `phase: 'waiting' | 'countdown' | 'success' | 'failed'`, `COUNTDOWN_SECONDS = 45`,
+  `beginCountdown()` (waiting → countdown, stamps `countdownStartedAt`), `failExtraction()` (countdown →
+  failed; a no-op outside `countdown`, so a stray call after the run already ended can't corrupt state),
+  `countdownRemaining()` (wall-clock elapsed from `countdownStartedAt`, clamped to
+  `[0, COUNTDOWN_SECONDS]`; returns the full `COUNTDOWN_SECONDS` outside the `countdown` phase so a HUD
+  reading it pre-emptively shows the full time rather than 0).
+- **`Extraction.tsx`** — reaching the pad while `phase === 'waiting'` now calls `beginCountdown()`
+  instead of setting `beaconState.extracted` directly; the pad stays lit and its beam/light pulse
+  faster and shift amber (`_padColorCounting` vs `_padColorWaiting`, both pre-allocated `THREE.Color`s —
+  zero per-frame allocation) for the duration. When `countdownRemaining() <= 0`, phase flips to
+  `success`, `playChoirFinale()` fires, and `beaconState.extracted = true` — `ExtractionWatch` (existing,
+  unchanged) still just polls that one flag, so the success path is a drop-in replacement of what used
+  to happen instantly. **Design call, not yet confirmed with the user:** leaving the pad's radius during
+  the countdown does nothing — only `failExtraction()` (a zombie hit) fails the run. If you wanted
+  "leaving the pad also fails it," that's a one-line addition inside the `counting` branch — flag this
+  during testing if the instant-touch-and-walk-away version feels wrong.
+- **`Zombies.tsx`** — the existing "extra slots + biased spawn toward the objective + faster respawn"
+  mechanic (previously only triggered by `capturingBeacon()`) now also triggers on
+  `extractionState.phase === 'countdown'`, biased toward `EXTRACTION_POS` instead of a tower. The poll
+  flag was renamed `capturing` → `surge` since it now covers two distinct triggers, not just captures.
+- **`App.tsx`** — no player-HP system exists anywhere in this game (never has), so rather than build one
+  just for this window, `onZombieAttack` (the existing hurt-flash callback, fired on every zombie hit)
+  now also calls `failExtraction()` whenever `extractionState.phase === 'countdown'` — one hit during
+  the countdown ends the run. New `CountdownHUD` (rAF poll, same idiom as `ObjectiveHUD`, positioned
+  just below it at `top-[84px]` so the two never overlap) shows `EXTRACTION IN {n}s — SURVIVE`,
+  reddening and enlarging under 10 seconds. New `ExtractFailWatch` (mirrors `ExtractionWatch`) polls
+  `extractionState.phase === 'failed'` and flips a new `extractFailed` state to show an "EXTRACTION
+  FAILED" end screen (same shape as the existing "EXTRACTED" screen, red instead of green, "reload the
+  page to try again").
+- **`audio/sfx.ts`** — `playChoirFragment` was split into a volume-taking inner
+  `playChoirFragmentAtVolume(index, v)` plus the existing distance-based wrapper, so the new
+  `playChoirFinale()` (all 5 fragments at once, fixed `0.5` volume each so five overlapping voices don't
+  clip) could reuse the same sample-then-synth path without duplicating the `tryRealAudio`/
+  `synthChoirFragment` dispatch logic.
+
+**Verified:** `npm run lint` + `npm run build` clean; every new export/import/call site confirmed by
+direct source read (`extractionState` fields, `Extraction.tsx`'s phase transitions, `Zombies.tsx`'s
+`surge` wiring, `App.tsx`'s new components and callback). **Not verified in this environment** (same
+rAF limitation as Nights 2–3): the countdown timer's actual on-screen ticking and colour/size change
+under 10s, the zombie spawn pressure's real-time "feel" during the finale (does 6 zombies biased onto a
+7m-radius pad feel fair or overwhelming — `45` seconds and the existing capture-surge numbers are a
+first guess, not tuned against real play), whether a hit landing at the exact moment of extraction
+races cleanly against success, and the fail screen's visual polish. Test the full light-all-5 →
+reach-pad → survive-45s loop end-to-end first — that path was never played, only read.

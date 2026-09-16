@@ -37,6 +37,7 @@ import {
 } from './world/beaconState';
 import { Beacons } from './components/Beacons';
 import { Extraction } from './components/Extraction';
+import { extractionState, countdownRemaining, failExtraction } from './world/extractionState';
 import { NoiseDebug } from './components/NoiseDebug';
 import { RootGrowths } from './components/RootGrowth';
 import { SporeFX } from './components/SporeFX';
@@ -412,6 +413,58 @@ function ExtractionWatch({ onExtract }: { onExtract: () => void }) {
   return null;
 }
 
+/** Night 4 — rAF poll for extractionState flipping to 'failed' (a zombie hit
+ *  landed mid-countdown). Separate from ExtractionWatch since this is a
+ *  distinct terminal state, not a variant of success. */
+function ExtractFailWatch({ onFail }: { onFail: () => void }) {
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      if (extractionState.phase === 'failed') onFail();
+      else raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [onFail]);
+  return null;
+}
+
+/** Night 4 — countdown readout, shown only once the extraction pad has been
+ *  reached and the timer is live. A separate overlay from ObjectiveHUD/the
+ *  compass (not a replacement) so "beacons lit" and "hold on" never fight
+ *  for the same line. Reddens and enlarges under 10s for urgency. */
+function CountdownHUD() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const el = ref.current;
+      if (el) {
+        if (extractionState.phase === 'countdown') {
+          const left = Math.ceil(countdownRemaining());
+          const urgent = left <= 10;
+          el.textContent = `EXTRACTION IN ${left}s — SURVIVE`;
+          el.style.display = 'block';
+          el.style.color = urgent ? '#ff5a4a' : '#ffb14a';
+          el.style.fontSize = urgent ? '22px' : '15px';
+        } else {
+          el.style.display = 'none';
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className="absolute top-[84px] left-1/2 -translate-x-1/2 z-20 pointer-events-none font-bold uppercase tracking-[0.15em] drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)] transition-[font-size] duration-150"
+      style={{ display: 'none' }}
+    />
+  );
+}
+
 /** Centered aiming crosshair. */
 function Crosshair() {
   return (
@@ -540,11 +593,21 @@ export default function App() {
     setHurt(true);
     if (hurtTimer.current) window.clearTimeout(hurtTimer.current);
     hurtTimer.current = window.setTimeout(() => setHurt(false), 320);
+    // Night 4: no player-HP system exists (never has, this whole game), so a
+    // hit landing during the extraction countdown fails the run outright
+    // rather than building out a health bar just for this one window.
+    if (extractionState.phase === 'countdown') failExtraction();
   }, []);
 
   const [extracted, setExtracted] = useState(false);
   const onExtract = useCallback(() => {
     setExtracted(true);
+    document.exitPointerLock?.();
+  }, []);
+
+  const [extractFailed, setExtractFailed] = useState(false);
+  const onExtractFail = useCallback(() => {
+    setExtractFailed(true);
     document.exitPointerLock?.();
   }, []);
 
@@ -555,6 +618,7 @@ export default function App() {
       {showHud && <StaminaHUD />}
       {showHud && <ObjectiveHUD />}
       {showHud && <SubtitleHUD />}
+      {showHud && <CountdownHUD />}
 
       {extracted && (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-[#02120a]/92 backdrop-blur-md">
@@ -565,6 +629,16 @@ export default function App() {
           <p className="text-sm text-slate-400 mt-6">
             {litBeaconCount()} / 5 beacons lit &nbsp;·&nbsp; reload the page to run it again
           </p>
+        </div>
+      )}
+
+      {extractFailed && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-[#120202]/92 backdrop-blur-md">
+          <p className="text-xs uppercase tracking-[0.4em] text-red-400/80 mb-3">Signal Lost</p>
+          <h1 className="text-5xl font-bold tracking-[0.2em] text-red-300 drop-shadow-[0_0_20px_rgba(255,60,60,0.5)]">
+            EXTRACTION FAILED
+          </h1>
+          <p className="text-sm text-slate-400 mt-6">reload the page to try again</p>
         </div>
       )}
 
@@ -683,6 +757,7 @@ export default function App() {
           <Extraction />
           <NoiseDebug />
           <ExtractionWatch onExtract={onExtract} />
+          <ExtractFailWatch onFail={onExtractFail} />
 
           <FlashlightFX on={isFlashlightOn && flashlightPower > 0.2} />
           <SporeFX />

@@ -499,15 +499,27 @@ async function tryRealAudio(url: string, volume: number): Promise<boolean> {
   }
 }
 
-/** Fired once, from Beacon.tsx, the instant a beacon transitions to `lit` —
- *  plays that beacon's fragment of the shared 5-part transmission. */
-export function playChoirFragment(index: number, distToPlayer: number): void {
-  const v = Math.max(0.2, Math.min(1, 1 - distToPlayer / 60));
+function playChoirFragmentAtVolume(index: number, v: number): void {
   const url = CHOIR_URLS[index];
   if (!url) return;
   void tryRealAudio(url, v).then((ok) => {
     if (!ok) synthChoirFragment(index, v);
   });
+}
+
+/** Fired once, from Beacon.tsx, the instant a beacon transitions to `lit` —
+ *  plays that beacon's fragment of the shared 5-part transmission. */
+export function playChoirFragment(index: number, distToPlayer: number): void {
+  const v = Math.max(0.2, Math.min(1, 1 - distToPlayer / 60));
+  playChoirFragmentAtVolume(index, v);
+}
+
+/** Night 4 — the extraction-success stinger: all 5 fragments of the
+ *  transmission play back at once instead of one-per-beacon, "the choir
+ *  finishing its sentence." Each voice is quieter than a solo fragment
+ *  (fixed volume, not distance-based) since five overlap. */
+export function playChoirFinale(): void {
+  CHOIR_URLS.forEach((_, i) => playChoirFragmentAtVolume(i, 0.5));
 }
 
 /** A groaned echo of the transmission's interval chime — pitched way down
