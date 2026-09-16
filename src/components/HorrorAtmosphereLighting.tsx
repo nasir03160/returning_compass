@@ -3,12 +3,20 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { playerPosition } from '../world/playerState';
 import { MOON_DIR, MOON_LIGHT_COLOR } from '../world/moon';
+import { nearestLitBeaconDist, ROOT_SIGNAL_RADIUS } from '../world/beaconState';
 
 // Cold-night fog/background tone — dark forest default. Fog colour matches the
 // background colour exactly: that's what lets distant geometry fade OUT
 // rather than fade to a visibly different colour (a common "fog looks like a
 // grey wall" mistake).
 const NIGHT_COLOR = '#080b12';
+// Night 3 — the fog/background lerp toward this near a LIT beacon. Sickly,
+// low-saturation green-amber: reads as "wrong" rather than a cartoonish
+// colour swap, and blended in gradually (see the useFrame below) so there's
+// no hard boundary, just terrain that looks a little worse the closer you get.
+const ROOT_TINT_COLOR = '#242414';
+const _rootTint = new THREE.Color(ROOT_TINT_COLOR);
+const _nightBase = new THREE.Color(NIGHT_COLOR);
 // THREE.FogExp2 density: exponential falloff (unlike linear THREE.Fog), so it
 // thickens gradually with distance rather than having a hard start/end plane —
 // reads as real atmospheric haze instead of a fade-out trick. 0.045 is tuned
@@ -75,6 +83,19 @@ export function HorrorAtmosphereLighting() {
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
+
+    // Night 3 — fog/background lerp toward the "wrong" tint as the player
+    // nears a lit beacon's noise radius. Distance-based blend, not a hard
+    // swap: `k` ramps 0→1 over the outer half of ROOT_SIGNAL_RADIUS so it
+    // reads as a gradual wrongness rather than a boundary you can see.
+    const dLit = nearestLitBeaconDist(playerPosition.x, playerPosition.z);
+    const k = THREE.MathUtils.clamp(1 - dLit / ROOT_SIGNAL_RADIUS, 0, 1);
+    if (scene.background instanceof THREE.Color) {
+      scene.background.copy(_nightBase).lerp(_rootTint, k);
+    }
+    if (scene.fog && (scene.fog as THREE.FogExp2).color) {
+      (scene.fog as THREE.FogExp2).color.copy(_nightBase).lerp(_rootTint, k);
+    }
 
     if (moonRef.current) {
       // same steep bearing the visible Moon disc sits along (world/moon.ts) —

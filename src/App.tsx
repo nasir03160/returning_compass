@@ -38,6 +38,8 @@ import {
 import { Beacons } from './components/Beacons';
 import { Extraction } from './components/Extraction';
 import { NoiseDebug } from './components/NoiseDebug';
+import { RootGrowths } from './components/RootGrowth';
+import { SporeFX } from './components/SporeFX';
 import { SafeAsset } from './components/SafeAsset';
 import { MoonFallback } from './components/MoonFallback';
 import { initAudio, setLocomotion, playJump, playLand, setWinded } from './audio/sfx';
@@ -677,11 +679,13 @@ export default function App() {
           <SafeAsset fallback={null}>
             <Beacons />
           </SafeAsset>
+          <RootGrowths />
           <Extraction />
           <NoiseDebug />
           <ExtractionWatch onExtract={onExtract} />
 
           <FlashlightFX on={isFlashlightOn && flashlightPower > 0.2} />
+          <SporeFX />
         </Physics>
 
         {/* first-person AKM — camera-tracked, fires from screen centre */}

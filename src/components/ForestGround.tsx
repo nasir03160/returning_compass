@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { playerPosition } from '../world/playerState';
 import { terrainHeightAt } from '../world/terrain';
 import { fbm2D } from '../world/noise';
+import { nearestLitBeaconDist, ROOT_SIGNAL_RADIUS } from '../world/beaconState';
 
 /* ---- tuning --------------------------------------------------- */
 const SPAN = 150; // one big ground mesh, this wide (fog hides the edge)
@@ -12,6 +13,14 @@ const SEGMENTS = 110; // grid resolution — enough to read real curvature, chea
 const SNAP = 34; // re-anchor the mesh every N units of travel
 const TEX_WORLD = 9; // texture repeats every N world units
 const DISPLACE_FRAMES = 6; // spread the vertex update over this many frames
+
+// Night 3 — ground colour lerps toward this near a lit beacon (same radius +
+// intent as the fog tint in HorrorAtmosphereLighting.tsx: a gradual "this
+// patch of dirt looks wrong," not a hard-edged colour swap).
+const GROUND_BASE_COLOR = '#8a9270';
+const GROUND_ROOT_TINT = '#6b6a3f';
+const _groundBase = new THREE.Color(GROUND_BASE_COLOR);
+const _groundTint = new THREE.Color(GROUND_ROOT_TINT);
 
 /**
  * Always-mounted physics floor + a plain dark fallback plane.
@@ -125,7 +134,7 @@ function useGroundBase(): GroundBase {
     const map = groundTexture();
     const material = new THREE.MeshStandardMaterial({
       map, // procedural mottled dirt/moss texture (groundTexture(), above)
-      color: '#8a9270', // tints the texture rather than washing it grey
+      color: GROUND_BASE_COLOR, // tints the texture rather than washing it grey
       // High roughness = a matte, diffuse-dominated surface (dirt/leaf litter,
       // not polished stone) — this is what lets the hemisphere/ambient fill
       // light actually show up as a visible (if dim) silhouette instead of
@@ -158,6 +167,12 @@ export function ForestGround() {
   useFrame(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
+
+    // Night 3 — same distance-based tint lerp as the fog, applied to the
+    // ground material's colour (which multiplies the procedural texture).
+    const dLit = nearestLitBeaconDist(playerPosition.x, playerPosition.z);
+    const k = Math.max(0, Math.min(1, 1 - dLit / ROOT_SIGNAL_RADIUS));
+    material.color.copy(_groundBase).lerp(_groundTint, k);
 
     const sx = Math.round(playerPosition.x / SNAP) * SNAP;
     const sz = Math.round(playerPosition.z / SNAP) * SNAP;

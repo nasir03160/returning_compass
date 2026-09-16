@@ -317,13 +317,13 @@ export function Zombie({ spawn, onDead, onAttack }: ZombieProps) {
       const heard = getNoiseIntensityAt(g.position) >= HEAR_THRESHOLD;
       if (heard || dist < SEE_RANGE) {
         z.alerted = true;
-        playZombieVoice(dist);
+        playZombieVoice(dist, g.position.x, g.position.z);
         z.nextVoice = now + 3000 + Math.random() * 3000;
       }
     }
     // periodic snarl while active
     if (z.alerted && z.state !== 'dead' && now > z.nextVoice) {
-      playZombieVoice(dist);
+      playZombieVoice(dist, g.position.x, g.position.z);
       z.nextVoice = now + 4000 + Math.random() * 4000;
     }
 

@@ -7,6 +7,7 @@
  *   wolf_echo.wav  - one-shot, fired every 60s for atmosphere (silently skipped if missing)
  *   jump.wav / land.wav - one-shots (fall back to a synth thud if missing)
  */
+import { nearestLitBeaconDist, ROOT_SIGNAL_RADIUS } from '../world/beaconState';
 
 type Loco = 'idle' | 'walk' | 'run';
 
@@ -511,8 +512,10 @@ export function playChoirFragment(index: number, distToPlayer: number): void {
 
 /** A groaned echo of the transmission's interval chime — pitched way down
  *  and smeared, not a spoken phrase (no TTS available). Used by
- *  playZombieVoice() below as an occasional variant bark. */
-function synthZombieEcho(volume: number): void {
+ *  playZombieVoice() below as an occasional variant bark. `rateMul` (Night 3)
+ *  scales it further down + stretches the envelope when the zombie is near a
+ *  lit beacon, so it reads as "breathing" rather than groaning. */
+function synthZombieEcho(volume: number, rateMul = 1): void {
   const c = synthCtx();
   if (!c) return;
   const master = c.createGain();
@@ -520,34 +523,47 @@ function synthZombieEcho(volume: number): void {
   master.connect(c.destination);
   const lp = c.createBiquadFilter();
   lp.type = 'lowpass';
-  lp.frequency.value = 480;
+  lp.frequency.value = 480 * rateMul;
   lp.connect(master);
-  [520 * 0.4, 780 * 0.4].forEach((f, i) => {
+  const stretch = 1 / rateMul; // slower playback = longer envelope
+  [520 * 0.4 * rateMul, 780 * 0.4 * rateMul].forEach((f, i) => {
     const osc = c.createOscillator();
     osc.type = 'sawtooth';
-    const t0 = c.currentTime + i * 0.35;
+    const t0 = c.currentTime + i * 0.35 * stretch;
+    const dur = 0.9 * stretch;
     osc.frequency.setValueAtTime(f, t0);
-    osc.frequency.exponentialRampToValueAtTime(f * 0.72, t0 + 0.9);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.72, t0 + dur);
     const g = c.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.linearRampToValueAtTime(0.4, t0 + 0.15);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);
+    g.gain.linearRampToValueAtTime(0.4, t0 + 0.15 * stretch);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.connect(g).connect(lp);
     osc.start(t0);
-    osc.stop(t0 + 1);
+    osc.stop(t0 + dur + 0.1);
   });
 }
 
 /** Zombie snarl — volume falls off with distance to the player. 1-in-4 barks
  *  use a synthesised "echo" of the transmission's tone instead of the usual
- *  sample — half-recognisable, not an announcement (Night 2). */
-export function playZombieVoice(distToPlayer: number): void {
+ *  sample — half-recognisable, not an announcement (Night 2).
+ *
+ *  Night 3: pass the zombie's own world position (zx, zz) and, within a lit
+ *  beacon's ROOT_SIGNAL_RADIUS, both the sample and the echo pitch/slow down
+ *  a little — reads as "breathing," not a full sample swap, so it stays
+ *  ambiguous. Distance-based (via nearestLitBeaconDist), no hard boundary. */
+export function playZombieVoice(distToPlayer: number, zx?: number, zz?: number): void {
   const v = Math.max(0.05, Math.min(1, 1 - distToPlayer / 42));
+  let rate = 1;
+  if (zx !== undefined && zz !== undefined) {
+    const dRoot = nearestLitBeaconDist(zx, zz);
+    const k = Math.max(0, Math.min(1, 1 - dRoot / ROOT_SIGNAL_RADIUS));
+    rate = 1 - k * 0.22; // up to ~22% slower/lower right at a lit tower
+  }
   if (Math.random() < 0.25) {
-    synthZombieEcho(v);
+    synthZombieEcho(v, rate);
     return;
   }
-  playSample(ZOMBIE_VOICE_URL, v, { jitter: 0.03 });
+  playSample(ZOMBIE_VOICE_URL, v, { jitter: 0.03, rate });
 }
 /** Empty-mag click. */
 export function playDryFire(): void {

@@ -23,6 +23,13 @@ export const BEACON_POSITIONS: readonly [number, number][] = [
 export const EXTRACTION_POS: readonly [number, number] = [0, -200];
 export const EXTRACTION_RADIUS = 7;
 
+// Night 3 ("Root Signal") reads this — kept in sync by hand with Beacon.tsx's
+// own LIT_NOISE.radius (30) since that's the noise-emission radius the design
+// doc says to reuse for the visual "something's wrong here" tell. Not
+// re-exported from Beacon.tsx to avoid coupling a component to this state
+// module in the other direction.
+export const ROOT_SIGNAL_RADIUS = 30;
+
 export interface BeaconRuntime {
   id: number;
   x: number;
@@ -64,6 +71,20 @@ export function nearestUnlitBeacon(x: number, z: number): BeaconRuntime | null {
       bd = d;
       best = b;
     }
+  }
+  return best;
+}
+
+/** Distance (metres) to the nearest LIT beacon, or Infinity if none are lit
+ *  yet. Pure query over existing state — Night 3's fog/ground tint, spore
+ *  particles, and zombie-voice detuning all read this; nothing here mutates
+ *  beacon phase/progress. */
+export function nearestLitBeaconDist(x: number, z: number): number {
+  let best = Infinity;
+  for (const b of beaconState.beacons) {
+    if (b.phase !== 'lit') continue;
+    const d = Math.hypot(b.x - x, b.z - z);
+    if (d < best) best = d;
   }
   return best;
 }
